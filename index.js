@@ -63,8 +63,8 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
 
   const payload = {
     email: member.email,
-    firstname: member.firstname,
-    lastname: member.lastname,
+    first_name: member.firstname,
+    last_name: member.lastname,
     membership: {
       joined_date: formatDate(member.date_joined),
       membership_id: member.membership_ID || undefined,
