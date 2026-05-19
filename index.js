@@ -1,0 +1,359 @@
+/**
+ * Bsport → WordPress Sync Middleware
+ * -----------------------------------
+ * Reçoit les webhooks member-create de Bsport (un par studio source)
+ * et crée/synchronise le membre dans chaque site WordPress cible.
+ *
+ * Stack : Node.js 18+ — aucune dépendance externe hormis express
+ * Hébergement recommandé : Railway, Render, ou Vercel (avec adaptation serverless)
+ *
+ * Installation :
+ *   npm install express
+ *   node index.js
+ */
+
+import express from "express";
+
+const app = express();
+app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// CONFIGURATION — à externaliser dans des variables d'environnement
+// ---------------------------------------------------------------------------
+
+const CONFIG = {
+  // Port d'écoute du serveur
+  port: process.env.PORT || 3000,
+
+  // Domaine de l'API Bsport (ex : "api.production.bsport.io")
+  bsportDomain: process.env.BSPORT_DOMAIN || "api.production.bsport.io",
+
+  // Clé API franchise Bsport
+  bsportApiKey: process.env.BSPORT_API_KEY || "YOUR_API_KEY",
+
+  // Identifiant de la franchise
+  bsportFranchisorId: process.env.BSPORT_FRANCHISOR_ID || "YOUR_FRANCHISOR_ID",
+
+  // ID du studio central "Sanctuary Pass" (cible)
+  sanctuaryPassStudioId:
+    process.env.SANCTUARY_PASS_STUDIO_ID || "YOUR_SANCTUARY_PASS_STUDIO_ID",
+
+  // Liste des IDs de studios sources autorisés à envoyer des webhooks
+  // Laisser vide [] pour accepter tous les studios (déconseillé en production)
+  allowedSourceStudioIds: process.env.ALLOWED_SOURCE_STUDIO_IDS
+    ? process.env.ALLOWED_SOURCE_STUDIO_IDS.split(",")
+    : [],
+
+  // Liste des sites WordPress à synchroniser
+  // Chaque entrée : { url, secretKey }
+  // secretKey = clé partagée configurée dans le plugin WordPress
+  wordpressSites: process.env.WP_SITES
+    ? JSON.parse(process.env.WP_SITES)
+    : [
+        {
+          url: "https://site1.example.com",
+          secretKey: "WP_SITE1_SECRET",
+        },
+        {
+          url: "https://site2.example.com",
+          secretKey: "WP_SITE2_SECRET",
+        },
+        // Ajouter autant de sites que nécessaire
+      ],
+
+  // Nombre max de tentatives en cas de CLI-102 (verrou)
+  maxRetries: 3,
+
+  // Délai initial entre tentatives (ms) — doublé à chaque essai (backoff exponentiel)
+  retryDelayMs: 1000,
+};
+
+// ---------------------------------------------------------------------------
+// UTILITAIRES
+// ---------------------------------------------------------------------------
+
+/**
+ * Formate une date ISO en YYYY-MM-DD (format attendu par l'API Bsport)
+ * Exemple : "2003-05-21T00:00:00+02:00" → "2003-05-21"
+ */
+function formatDate(isoString) {
+  if (!isoString) return null;
+  return isoString.split("T")[0];
+}
+
+/**
+ * Pause asynchrone
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Log structuré avec timestamp
+ */
+function log(level, message, data = {}) {
+  console.log(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      ...data,
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CRÉATION DU MEMBRE DANS BSPORT (studio Sanctuary Pass)
+// ---------------------------------------------------------------------------
+
+/**
+ * Appelle la Public API Bsport pour créer le membre dans le studio cible.
+ * Gère les cas 201 (créé), 409-CLI-101 (déjà présent = OK), 409-CLI-102 (retry).
+ *
+ * @param {object} member - Données du membre issues du webhook
+ * @returns {Promise<{success: boolean, status: number, alreadyExists: boolean}>}
+ */
+async function createMemberInSanctuaryPass(member, attempt = 1) {
+  const url = `https://${CONFIG.bsportDomain}/public-api/v1/management/clients/`;
+
+  const payload = {
+    email: member.email,
+    firstname: member.firstname,
+    lastname: member.lastname,
+    membership: {
+      joined_date: formatDate(member.date_joined),
+      membership_id: member.membership_ID || undefined,
+      barcode: member.barcode || undefined,
+      is_email_accepted: member.accept_email ?? undefined,
+      is_sms_accepted: member.accept_sms ?? undefined,
+    },
+  };
+
+  // Supprime les champs undefined pour ne pas envoyer de clés nulles
+  payload.membership = Object.fromEntries(
+    Object.entries(payload.membership).filter(([, v]) => v !== undefined)
+  );
+
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Api-Key": CONFIG.bsportApiKey,
+    "X-Client-ID": "tsg-franchise",
+    "X-Franchisor-ID": CONFIG.bsportFranchisorId,
+    "X-Company-ID": CONFIG.sanctuaryPassStudioId,
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    const responseBody = await response.json().catch(() => ({}));
+
+    // 201 : membre créé
+    if (response.status === 201) {
+      log("info", "Membre créé dans Sanctuary Pass", {
+        email: member.email,
+        memberId: member.id,
+      });
+      return { success: true, status: 201, alreadyExists: false };
+    }
+
+    // 409 CLI-101 : membre déjà existant → succès fonctionnel
+    if (response.status === 409 && responseBody?.code === "CLI-101") {
+      log("info", "Membre déjà présent dans Sanctuary Pass (CLI-101)", {
+        email: member.email,
+      });
+      return { success: true, status: 409, alreadyExists: true };
+    }
+
+    // 409 CLI-102 : verrou temporaire → retry avec backoff
+    if (response.status === 409 && responseBody?.code === "CLI-102") {
+      if (attempt < CONFIG.maxRetries) {
+        const delay = CONFIG.retryDelayMs * Math.pow(2, attempt - 1);
+        log("warn", `CLI-102 — retry dans ${delay}ms (tentative ${attempt})`, {
+          email: member.email,
+        });
+        await sleep(delay);
+        return createMemberInSanctuaryPass(member, attempt + 1);
+      }
+      log("error", "CLI-102 — nombre max de tentatives atteint", {
+        email: member.email,
+      });
+      return { success: false, status: 409, alreadyExists: false };
+    }
+
+    // Autres erreurs
+    log("error", "Erreur API Bsport", {
+      email: member.email,
+      status: response.status,
+      body: responseBody,
+    });
+    return { success: false, status: response.status, alreadyExists: false };
+  } catch (err) {
+    log("error", "Exception lors de l'appel API Bsport", {
+      email: member.email,
+      error: err.message,
+    });
+    return { success: false, status: 0, alreadyExists: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SYNCHRONISATION VERS LES SITES WORDPRESS
+// ---------------------------------------------------------------------------
+
+/**
+ * Envoie les données du membre à un site WordPress via le plugin custom.
+ * L'endpoint WordPress est : POST /wp-json/bsport/v1/sync
+ * Authentifié par une clé secrète partagée dans le header X-Bsport-Secret.
+ *
+ * @param {object} site   - { url, secretKey }
+ * @param {object} member - Données du membre
+ */
+async function syncMemberToWordPress(site, member) {
+  const endpoint = `${site.url}/wp-json/bsport/v1/sync`;
+
+  const payload = {
+    email: member.email,
+    firstname: member.firstname,
+    lastname: member.lastname,
+    membership_id: member.membership_ID || null,
+    barcode: member.barcode || null,
+    date_joined: formatDate(member.date_joined),
+    accept_email: member.accept_email ?? null,
+    accept_sms: member.accept_sms ?? null,
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Bsport-Secret": site.secretKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      log("info", "Membre synchronisé vers WordPress", {
+        site: site.url,
+        email: member.email,
+      });
+      return { success: true, site: site.url };
+    } else {
+      const body = await response.text();
+      log("warn", "Échec synchronisation WordPress", {
+        site: site.url,
+        email: member.email,
+        status: response.status,
+        body,
+      });
+      return { success: false, site: site.url, status: response.status };
+    }
+  } catch (err) {
+    log("error", "Exception lors de la sync WordPress", {
+      site: site.url,
+      email: member.email,
+      error: err.message,
+    });
+    return { success: false, site: site.url, error: err.message };
+  }
+}
+
+/**
+ * Envoie en parallèle le membre vers tous les sites WordPress configurés.
+ */
+async function syncMemberToAllWordPressSites(member) {
+  const results = await Promise.allSettled(
+    CONFIG.wordpressSites.map((site) => syncMemberToWordPress(site, member))
+  );
+
+  return results.map((r) =>
+    r.status === "fulfilled" ? r.value : { success: false, error: r.reason }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ENDPOINT WEBHOOK — POST /webhook/bsport
+// ---------------------------------------------------------------------------
+
+app.post("/webhook/bsport", async (req, res) => {
+  const body = req.body;
+
+  // --- 1. Vérification de la structure de base ---
+  if (!body || typeof body !== "object") {
+    return res.status(400).json({ error: "Payload invalide" });
+  }
+
+  const { event_type, data } = body;
+
+  // On ne traite que member-create
+  if (event_type !== "member-create") {
+    log("info", "Événement ignoré (non member-create)", { event_type });
+    return res.status(200).json({ ignored: true, reason: "event_type ignoré" });
+  }
+
+  const member = data?.member;
+
+  // --- 2. Validation des champs obligatoires ---
+  if (!member?.email) {
+    log("warn", "Webhook reçu sans email", { body });
+    return res.status(400).json({ error: "Email manquant" });
+  }
+
+  if (!member?.firstname || !member?.lastname) {
+    log("warn", "Webhook reçu sans prénom/nom", { email: member.email });
+    return res.status(400).json({ error: "Prénom ou nom manquant" });
+  }
+
+  log("info", "Webhook member-create reçu", {
+    memberId: member.id,
+    email: member.email,
+  });
+
+  // Répondre immédiatement à Bsport pour éviter le timeout webhook
+  res.status(200).json({ received: true });
+
+  // --- 3. Traitement asynchrone ---
+  try {
+    // 3a. Créer le membre dans Sanctuary Pass (Bsport)
+    const bsportResult = await createMemberInSanctuaryPass(member);
+
+    // 3b. Synchroniser vers tous les sites WordPress (en parallèle)
+    const wpResults = await syncMemberToAllWordPressSites(member);
+
+    log("info", "Synchronisation terminée", {
+      email: member.email,
+      bsport: bsportResult,
+      wordpress: wpResults,
+    });
+  } catch (err) {
+    log("error", "Erreur non gérée dans le traitement du webhook", {
+      email: member?.email,
+      error: err.message,
+      stack: err.stack,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ENDPOINT DE SANTÉ
+// ---------------------------------------------------------------------------
+
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    wordpressSites: CONFIG.wordpressSites.map((s) => s.url),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DÉMARRAGE
+// ---------------------------------------------------------------------------
+
+app.listen(CONFIG.port, () => {
+  log("info", `Middleware Bsport démarré sur le port ${CONFIG.port}`);
+});
