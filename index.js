@@ -136,6 +136,9 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
 // ENDPOINT WEBHOOK — POST /webhook/bsport
 // ---------------------------------------------------------------------------
 
+// GET : vérification URL par Bsport
+app.get("/webhook/bsport", (req, res) => res.status(200).json({ status: "ok" }));
+
 app.post("/webhook/bsport", async (req, res) => {
   const body = req.body;
 
