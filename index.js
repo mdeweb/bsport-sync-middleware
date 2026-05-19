@@ -106,13 +106,13 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
     }
 
     // 409 CLI-101 : déjà existant → succès fonctionnel
-    if (response.status === 409 && responseBody?.code === "CLI-101") {
+    if (response.status === 409 && responseBody?.code === "CLI-101" || responseBody?.code === "MEM-101") {
       log("info", "Membre déjà présent dans Sanctuary Pass (CLI-101)", { email: member.email });
       return { success: true, status: 409, alreadyExists: true };
     }
 
     // 409 CLI-102 : verrou temporaire → retry
-    if (response.status === 409 && responseBody?.code === "CLI-102") {
+    if (response.status === 409 && responseBody?.code === "CLI-102" || responseBody?.code === "MEM-102") {
       if (attempt < CONFIG.maxRetries) {
         const delay = CONFIG.retryDelayMs * Math.pow(2, attempt - 1);
         log("warn", `CLI-102 — retry dans ${delay}ms (tentative ${attempt})`, { email: member.email });
