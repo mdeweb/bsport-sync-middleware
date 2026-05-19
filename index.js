@@ -69,8 +69,8 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
       joined_date: formatDate(member.date_joined),
       membership_id: member.membership_ID || undefined,
       barcode: member.barcode || undefined,
-      is_email_accepted: member.accept_email ?? undefined,
-      is_sms_accepted: member.accept_sms ?? undefined,
+      is_email_accepted: true,
+      is_sms_accepted: true,
     },
   };
 
