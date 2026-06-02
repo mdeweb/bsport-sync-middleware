@@ -59,7 +59,7 @@ function log(level, message, data = {}) {
 // ---------------------------------------------------------------------------
 
 async function createMemberInSanctuaryPass(member, attempt = 1) {
-  const url = `https://${CONFIG.bsportDomain}/api/v1/members/`;
+  const url = `https://${CONFIG.bsportDomain}/api/v1/management/clients/`;
 
   const payload = {
     email: member.email,
