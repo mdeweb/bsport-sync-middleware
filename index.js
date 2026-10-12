@@ -9,6 +9,7 @@
  */
 
 import express from "express";
+import { registerBrevoSync } from "./brevo/register.js";
 
 const app = express();
 app.use(express.json());
@@ -63,8 +64,8 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
 
   const payload = {
     email: member.email,
-    firstname: member.firstname,
-    lastname: member.lastname,
+    first_name: member.firstname,
+    last_name: member.lastname,
     membership: {
       joined_date: formatDate(member.date_joined),
       membership_id: member.membership_ID || undefined,
@@ -196,6 +197,9 @@ app.get("/health", (req, res) => {
 // ---------------------------------------------------------------------------
 // DÉMARRAGE
 // ---------------------------------------------------------------------------
+
+// Synchro quotidienne Bsport → Brevo (voir README-BREVO.md)
+registerBrevoSync(app);
 
 app.listen(CONFIG.port, () => {
   log("info", `Middleware Bsport démarré sur le port ${CONFIG.port}`);
