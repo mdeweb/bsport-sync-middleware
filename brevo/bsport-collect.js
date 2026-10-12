@@ -13,6 +13,9 @@ import { PATHS } from "./bsport-client.js";
  * - Les notes clients (qui peuvent contenir des informations médicales) ne sont jamais lues.
  */
 
+/** Valeur des champs studio pour un membre qui n'a jamais suivi de séance (mode complet). */
+export const NO_STUDIO = "Aucun";
+
 const SUB_STATUS = { 0: "Non démarré", 1: "En cours", 2: "Arrêté", 3: "En pause", 4: "Terminé" };
 
 const idOf = (value) => (value && typeof value === "object" ? value.id : value);
@@ -229,7 +232,10 @@ export async function collectBsport(client, config, { mode, since, today, studio
   const doneStudios = new Set(checkpoint?.doneStudios || []);
 
   if (mode !== "contacts") {
-    for (const [studioId, studioName] of Object.entries(config.sourceStudios)) {
+    // Le Sanctuary Pass vend aussi des pass : ses paiements et abonnements comptent dans l'activité
+    // (il n'a pas de séances, il n'apparaît donc jamais dans les studios fréquentés).
+    const sources = { ...config.sourceStudios, [config.bsportCompanyId]: "Sanctuary Pass" };
+    for (const [studioId, studioName] of Object.entries(sources)) {
       if (mode === "full" && doneStudios.has(studioId)) continue; // déjà lu lors d'un passage interrompu
       await collectStudio(client, config, activity, { mode, since, today, studioId, studioName });
       doneStudios.add(studioId);
@@ -283,7 +289,8 @@ function addDay(d, n) {
 export function toMember(spClient, activity, config, { full = false } = {}) {
   const a = activity || emptyActivity();
   const optin = (value) => (value === undefined || value === null ? (config.unknownOptinIsOptin ? true : undefined) : Boolean(value));
-  const studios = [...a.studios.entries()];
+  // Studios fréquentés = studios où le membre a réellement suivi au moins une séance.
+  const studios = [...a.studios.entries()].filter(([, n]) => n > 0);
   const main = [...studios].sort((x, y) => y[1] - x[1])[0];
   const sub = a.subscription;
   return {
@@ -302,7 +309,7 @@ export function toMember(spClient, activity, config, { full = false } = {}) {
     archived: spClient.is_archived === true,
     isStaff: false,
     secondaryEmail: undefined,
-    mainStudio: main ? main[0] : undefined,
+    mainStudio: main ? main[0] : full ? NO_STUDIO : undefined,
     studios: studios.map(([name]) => name),
     passType: sub?.name || (a.hasActivePass ? a.passName || "Carnet" : undefined),
     subStatus: sub ? SUB_STATUS[sub.status] : a.hasActivePass ? "Carnet actif" : undefined,
@@ -335,8 +342,9 @@ export function mergeWithExisting(member, attrs) {
   m.lastBooking = maxDate(member.lastBooking, day(attrs.LAST_BOOKING_DATE));
   m.previousActivity = day(attrs.DATE_DERNIERE_ACTIVITE);
   m.joinedAt = minDate(member.joinedAt, day(attrs.FIRST_DATE_JOINED));
-  const previous = attrs.STUDIOS_FREQUENTES ? String(attrs.STUDIOS_FREQUENTES).split(", ").filter(Boolean) : [];
+  const previous = attrs.STUDIOS_FREQUENTES ? String(attrs.STUDIOS_FREQUENTES).split(", ").filter((x) => x && x !== NO_STUDIO) : [];
   m.studios = [...new Set([...previous, ...member.studios])];
-  m.mainStudio = attrs.STUDIO_PRINCIPAL || member.mainStudio;
+  const previousMain = attrs.STUDIO_PRINCIPAL && attrs.STUDIO_PRINCIPAL !== NO_STUDIO ? attrs.STUDIO_PRINCIPAL : undefined;
+  m.mainStudio = previousMain || member.mainStudio;
   return m;
 }

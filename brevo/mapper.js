@@ -82,7 +82,7 @@ export function toBrevoContact(member, config, now = new Date()) {
     EMAIL_2: member.secondaryEmail,
     FIRST_DATE_JOINED: member.joinedAt,
     STUDIO_PRINCIPAL: member.mainStudio,
-    STUDIOS_FREQUENTES: member.studios.length ? member.studios.join(", ") : undefined,
+    STUDIOS_FREQUENTES: member.studios.length ? member.studios.join(", ") : member.mainStudio === "Aucun" ? "Aucun" : undefined,
     TYPE_PASS: member.passType,
     STATUT_ABO: member.subStatus,
     DATE_DEBUT_ABO: member.subStart,
