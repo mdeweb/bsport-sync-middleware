@@ -30,7 +30,7 @@ export function loadConfig(env = process.env) {
     // utilisée par le middleware existant sur l'ancien domaine.
     bsportDomain: env.BSPORT_PUBLIC_DOMAIN || "public.production.bsport.io",
     bsportApiKey: env.BSPORT_API_KEY || "",
-    bsportClientId: env.BSPORT_CLIENT_ID || "tsg-franchise",
+    bsportClientId: env.BSPORT_CLIENT_ID || "tsg-matthieu",
     bsportFranchisorId: env.BSPORT_FRANCHISOR_ID || "92",
     bsportCompanyId: env.SANCTUARY_PASS_STUDIO_ID || "4781",
     // Studios des marques : {"id_bsport": "Nom du studio"}. Les réservations, abonnements et achats
