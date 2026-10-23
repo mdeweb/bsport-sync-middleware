@@ -82,7 +82,7 @@ async function createMemberInSanctuaryPass(member, attempt = 1) {
   const headers = {
     "Content-Type": "application/json",
     "X-Api-Key": CONFIG.bsportApiKey,
-    "X-Client-ID": "tsg-franchise",
+    "X-Client-ID": "tsg-matthieu",
     "X-Franchisor-ID": CONFIG.bsportFranchisorId,
     "X-Company-ID": CONFIG.sanctuaryPassStudioId,
   };
