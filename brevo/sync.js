@@ -216,13 +216,8 @@ export async function runSync(config, { fetchImpl = fetch, now = new Date(), for
       }
     }
 
-    for (const email of plan.unblock) {
-      try {
-        await brevo.setEmailBlacklisted(email, false);
-      } catch (err) {
-        report.errors.push(`Déblocage : ${err.message}`);
-      }
-    }
+    // Aucun déblocage automatique : un contact bloqué dans Brevo (désinscription, hard bounce,
+    // plainte) le reste. report.toUnblock indique seulement combien auraient pu l'être.
 
     report.deleted = 0;
     for (const deletion of plan.deletions) {

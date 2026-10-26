@@ -1,5 +1,16 @@
 import { log, sleep } from "./logger.js";
 
+/**
+ * L'import Brevo ignore les vrais booléens (true/false) : les champs oui/non doivent être envoyés
+ * en texte « yes » / « no » (vérifié le 26/10/2026 avec scripts/brevo-test-booleens.js).
+ */
+export function toImportFormat(contact) {
+  const attributes = Object.fromEntries(
+    Object.entries(contact.attributes || {}).map(([k, v]) => [k, typeof v === "boolean" ? (v ? "yes" : "no") : v])
+  );
+  return { ...contact, attributes };
+}
+
 /** Appels à l'API Brevo v3 utilisés par la synchro. */
 export class BrevoClient {
   constructor(config, fetchImpl = fetch) {
@@ -84,7 +95,7 @@ export class BrevoClient {
   /** Import par lot. emailBlacklist = true bloque l'envoi d'emails à tous les contacts du lot. */
   importContacts({ contacts, listIds, emailBlacklist = false }) {
     return this.request("POST", "/contacts/import", {
-      jsonBody: contacts,
+      jsonBody: contacts.map(toImportFormat),
       listIds,
       updateExistingContacts: true,
       emptyContactsAttributes: false,
