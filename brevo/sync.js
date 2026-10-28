@@ -4,7 +4,7 @@ import { SyncState, addDays } from "./state.js";
 import { localParts } from "./scheduler.js";
 import { BrevoClient } from "./brevo-client.js";
 import { ExclusionList } from "./exclusions.js";
-import { dedupeSms, isValidEmail, mergeDuplicates, toBrevoContact } from "./mapper.js";
+import { dedupeSms, isRelayEmail, isValidEmail, mergeDuplicates, toBrevoContact } from "./mapper.js";
 import { log, sendAlert } from "./logger.js";
 
 function chunk(items, size) {
@@ -27,6 +27,7 @@ export function buildPlan({ members, brevoContacts, exclusions, config, now = ne
     staff: 0,
     optin: 0,
     nonOptin: 0,
+    relayBlocked: 0,
     emailChanges: 0,
     toUnblock: 0,
     toDelete: 0,
@@ -81,6 +82,12 @@ export function buildPlan({ members, brevoContacts, exclusions, config, now = ne
     if (member.isStaff) {
       report.staff += 1;
       (hasOptin ? batches.staffOptin : batches.staffNonOptin).push(contact);
+      continue;
+    }
+    // Adresses relais ClassPass / Gymlib : importées (données d'activité utiles) mais bloquées à l'envoi.
+    if (isRelayEmail(member.email)) {
+      report.relayBlocked += 1;
+      batches.nonOptin.push(contact);
       continue;
     }
     if (hasOptin) {

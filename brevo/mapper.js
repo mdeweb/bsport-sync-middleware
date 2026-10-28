@@ -6,6 +6,15 @@ export function isValidEmail(email) {
   return typeof email === "string" && EMAIL_RE.test(email);
 }
 
+/**
+ * Adresse relais d'une plateforme partenaire (ClassPass, Gymlib) : la plateforme rejette les emails
+ * marketing (hard bounce). Ces contacts sont importés mais toujours bloqués à l'envoi (demande TSG du 27/10/2026).
+ */
+const RELAY_EMAIL = /@(members\.classpass\.com|([a-z0-9-]+\.)*gymlib\.com)$/i;
+export function isRelayEmail(email) {
+  return typeof email === "string" && RELAY_EMAIL.test(email.trim());
+}
+
 /** Numéro au format international pour l'attribut SMS de Brevo. Renvoie undefined si inexploitable. */
 export function normalizePhone(phone, defaultPrefix = "33") {
   if (!phone) return undefined;

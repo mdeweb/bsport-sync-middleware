@@ -265,12 +265,15 @@ async function collectStudio(client, config, activity, { mode, since, today, stu
     );
   }
   if (mode === "delta" && since && since >= today) return; // déjà compté aujourd'hui
+  // Filtres de dates Bsport (correctif de l'API v2 du 27/10/2026) : class_start_after / class_start_before
+  // pour les réservations, created_after / created_before pour les factures. Une date seule = minuit,
+  // la borne haute est exclue. Les lignes sont de toute façon refiltrées ici par jour (activity.inWindow).
   const windows = mode === "delta" && since ? [[since, today]] : monthWindows(config.backfillFrom, today);
   for (const [from, to] of windows) {
     await client.forEachPage(
       PATHS.bookings,
       studioId,
-      { ...EXPAND, has_attended: "true", class_started_after_date: from, class_started_before_date: to },
+      { ...EXPAND, has_attended: "true", class_start_after: from, class_start_before: to },
       (rows) => activity.addBookings(studioId, studioName, rows)
     );
     await client.forEachPage(PATHS.invoices, studioId, { ...EXPAND, created_after: from, created_before: to }, (rows) =>
